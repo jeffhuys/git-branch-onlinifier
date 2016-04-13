@@ -4,6 +4,10 @@
 var chalk               = require('chalk');
 var child               = require('child_process');
 var _                   = require('lodash');
+var fs                  = require('fs');
+var mkdirp              = require('mkdirp');
+var ncp                 = require('ncp').ncp;
+var rimraf              = require('rimraf');
 
 var express             = require('express'),
     expressCookieParser = require('cookie-parser'),
@@ -26,7 +30,8 @@ var hbs = handlebars.create({
             return servers.length;
         }
     }
-})
+});
+ncp.limit = 16;
 
 // Get the arguments
 var args = process.argv.slice(2);
@@ -34,10 +39,6 @@ var args = process.argv.slice(2);
 if(args.length > 0) {
     switch(args[0]) {
         case '-h':
-            printHelp();
-            break;
-
-        case 'init':
             printHelp();
             break;
 
@@ -81,7 +82,8 @@ app.get('/', function(req, res) {
 
 app.get('/spawn', function(req, res) {
     logDebug('Spawning ' + req.query.branch + ' @ ' + req.query.repo);
-    spawnBranch(req.query.repo, req.query.branch);
+
+    prepareBranch(req.query.repo, req.query.branch);
 
     toaster(req, 'Spawning ' + req.query.branch + '@' + req.query.repo + '. Please wait.');
     res.redirect('/');
@@ -178,6 +180,72 @@ function randomString(length) {
     return result;
 }
 
+function prepareBranch(repoName, branchName) {
+    var canContinue = false;
+    var path = __dirname + '/repos/' + repoName + '/' + branchName;
+
+    // Check if this repo + branch exists
+    // http://stackoverflow.com/questions/4482686/check-synchronously-if-file-directory-exists-in-node-js
+    try {
+        fs.accessSync(path, fs.F_OK);
+
+        logDebug(path + ' existed. Removing...');
+
+        rimraf(path, function() {
+            logDebug('Removed. Copying...');
+
+            mkdirp(path, function(err) {
+                if(err) {
+                    console.error(err);
+                    return;
+                }
+
+                copyTemplate(repoName, branchName, function(success) {
+                    if(success) {
+                        logDebug('Copy done.');
+                        spawnBranch(repoName, branchName);
+                    } else {
+                        logError('copyTemplate encountered an error');
+                    }
+                });
+            });
+        });
+    } catch (e) {
+        // Repo + branch doesn't exist
+
+        mkdirp(path, function(err) {
+            if(err) {
+                console.error(err);
+                return;
+            }
+
+            logDebug(path + ' created.');
+            
+            copyTemplate(repoName, branchName, function(success) {
+                if(success) {
+                    spawnBranch(repoName, branchName);
+                } else {
+                    logError('copyTemplate encountered an error');
+                }
+            });
+        })
+    }
+}
+
+function copyTemplate(repoName, branchName, callback) {
+    var path = __dirname + '/repos/' + repoName + '/' + branchName;
+
+    // Copy the template to the folder
+    ncp(__dirname + '/repos/' + repoName + '/_template/', path, function(err) {
+        if(err) {
+            callback(false);
+        }
+
+        logDebug('Copied _template to ' + path);
+        callback(true);
+    })
+}
+
 function spawnBranch(repoName, branchName) {
     var childObject = {
         id: randomID(servers),
@@ -206,7 +274,7 @@ function spawnBranch(repoName, branchName) {
     servers.push(childObject);
 
     logDebug('Spawning branch: ' + chalk.bold.green(branchName) + ' of repository: ' + chalk.bold.blue(repoName));
-    require('simple-git')(__dirname + '/repos/' + repoName)
+    require('simple-git')(__dirname + '/repos/' + repoName + '/' + branchName)
         .outputHandler(function (command, stdout, stderr) {
                 stdout.pipe(process.stdout);
                 stderr.pipe(process.stderr);
@@ -214,10 +282,12 @@ function spawnBranch(repoName, branchName) {
         .pull()
         .checkout(branchName)
         .pull(function(err, update) {
-            var opts = { cwd: __dirname + '/repos/' + repoName };
+            var opts = { cwd: __dirname + '/repos/' + repoName + '/' + branchName };
 
             logDebug('Checkout done.');
             logDebug('Executing npm install...');
+            childObject.status = 'npm install';
+
             child.exec('npm install', opts, function(err, stdout, stderr) {
                 if(err) {
                     logError('npm install failed');
@@ -226,6 +296,8 @@ function spawnBranch(repoName, branchName) {
                 }
 
                 logDebug('Executing bower install...');
+                childObject.status = 'bower install';
+
                 child.exec('bower install', opts, function(err, stdout, stderr) {
                     if(err) {
                         logError('bower install failed');
@@ -234,6 +306,8 @@ function spawnBranch(repoName, branchName) {
                     }
 
                     logDebug('Executing gulp serve...');
+                    childObject.status = 'gulp serve';
+
                     childObject.process = child.spawn('gulp', ['serve'], opts);
 
                     childObject.process.stdout.setEncoding('utf8');

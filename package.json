@@ -15,6 +15,9 @@
     "express-handlebars": "^3.0.0",
     "express-session": "^1.13.0",
     "lodash": "^4.10.0",
+    "mkdirp": "^0.5.1",
+    "ncp": "^2.0.0",
+    "rimraf": "^2.5.2",
     "simple-git": "^1.32.0"
   }
 }

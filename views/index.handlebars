@@ -1,10 +1,40 @@
-Servers online: {{getServersOnlineCount}} (<a href="/killAll">kill them all!</a>)
-
-<br>
 <h2>Spawn a branch</h2>
 
 <form action="/spawn" method="get" id="spawnForm">
-	<input type="text" placeholder="Repository name" name="repo">
-	<input type="text" placeholder="Branch name" name="branch">
-	<button type="submit">Spawn!</button>
+    <input type="text" placeholder="Repository name" name="repo">
+    <input type="text" placeholder="Branch name" name="branch">
+    <button type="submit">Spawn!</button>
 </form>
+
+<h2>Servers online ({{getServersOnlineCount}})</h2>
+<a href="/logs">View logs</a> | <a href="/killAll">Kill all servers</a>
+<br>
+<br>
+
+<table class="table table-hover">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Repository</th>
+            <th>Branch</th>
+            <th>Port</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+    {{#each servers}}
+        <tr>
+            <th scope="row">{{id}}</th>
+            <td>{{repo}}</td>
+            <td>{{branch}}</td>
+            <td>{{port}}</td>
+            <td>{{status}}</td>
+            <td>
+                <a href="/log/{{id}}" class="btn btn-info">Log</a>
+                <a href="/kill/{{id}}" class="btn btn-danger">Kill</a>
+            </td>
+        </tr>
+    {{/each}}
+    </tbody>
+</table>

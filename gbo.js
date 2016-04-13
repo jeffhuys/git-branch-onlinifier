@@ -1,10 +1,15 @@
 /* ==========
     Requires
    ========== */
-var chalk      = require('chalk');
-var child      = require('child_process');
-var app        = require('express')();
-var handlebars = require('express-handlebars');
+var chalk               = require('chalk');
+var child               = require('child_process');
+var _                   = require('lodash');
+
+var express             = require('express'),
+    expressCookieParser = require('cookie-parser'),
+    expressSession      = require('express-session')
+    handlebars          = require('express-handlebars'),
+    app                 = express();
 
 
 /* ==========
@@ -17,14 +22,8 @@ var servers = [];
 var hbs = handlebars.create({
     defaultLayout: 'main',
     helpers: {
-        getServersOnline: function() {
-            return servers;
-        },
         getServersOnlineCount: function() {
             return servers.length;
-        },
-        checkout: function(repoName, branchName) {
-            checkoutBranch(repoName, branchName);
         }
     }
 })
@@ -48,7 +47,7 @@ if(args.length > 0) {
             break;
 
         default:
-            checkoutBranch(args[0], args[1]);
+            spawnBranch(args[0], args[1]);
             break;
     }
 } else {
@@ -65,22 +64,58 @@ if(args.length > 0) {
 app.engine('handlebars', hbs.engine);
 app.set('view engine', 'handlebars');
 
+app.use(expressCookieParser());
+app.use(expressSession({secret: '1234567890QWERTY'}));
+
+app.use(function(req, res, next) {
+    res.locals = {
+        messages: getToaster(req)
+    }
+    next();
+});
+
 app.get('/', function(req, res) {
     logDebug('GET /');
     res.render('index', { servers: servers });
 });
 
 app.get('/spawn', function(req, res) {
-    logDebug('Spawning ' + req.query.repo + ' @ ' + req.query.branch);
-    res.render('spawn', { repoName: req.query.repo, branchName: req.query.branch });
-    checkoutBranch(req.query.repo, req.query.branch);
+    logDebug('Spawning ' + req.query.branch + ' @ ' + req.query.repo);
+    spawnBranch(req.query.repo, req.query.branch);
+
+    toaster(req, 'Spawning ' + req.query.branch + '@' + req.query.repo + '. Please wait.');
+    res.redirect('/');
+});
+
+app.get('/logs', function(req, res) {
+    logDebug('GET /logs');
+    res.render('logs', { });
+});
+
+app.get('/log/:id', function(req, res) {
+    var server = findServerByID(req.params.id);
+    
+    logDebug('Rendering log for ' + req.params.id);
+
+    res.render('log', { 'logStr': server.log });
 });
 
 app.get('/killAll', function(req, res) {
     logDebug('Killing all servers');
-    res.render('killAll');
     killAllServers();
+
+    toaster(req, 'Killed all servers.');
+    res.redirect('/');
 });
+
+app.get('/kill/:id', function(req, res) {
+    logDebug('Killing ' + req.params.id);
+
+    toaster(req, 'Killed server ' + findServerByID(req.params.id).branch + '@' + findServerByID(req.params.id).repo);
+    killServerByID(req.params.id);
+
+    res.redirect('/');
+})
 
 
 /* =============
@@ -97,10 +132,16 @@ function listen() {
     });
 }
 
+function killServer(i) {
+    if(servers) {
+        killServerByID(i);
+    }
+}
+
 function killAllServers() {
     if(servers && servers.length > 0) {
         for(var i = 0; i < servers.length; i++) {
-            servers[i].kill();
+            servers[i].process.kill();
         }
 
         // Empty the array of dead children
@@ -108,8 +149,63 @@ function killAllServers() {
     }
 }
 
-function checkoutBranch(repoName, branchName) {
-    logDebug('Checking out branch: ' + chalk.bold.green(branchName) + ' of repository: ' + chalk.bold.blue(repoName));
+function findServerByID(id) {
+    return _.find(servers, function(s) { return s.id == id;});
+}
+
+function removeServerByID(id) {
+    servers = _.reject(servers, function(s) { return s.id == id; });
+}
+
+function killServerByID(id, keep) {
+    findServerByID(id).process.kill();
+
+    if(!keep) removeServerByID(id);
+}
+
+function randomID(arr) {
+    var ID = randomString(8);
+    while(findServerByID(ID)) {
+        ID = randomString(8);
+    }
+    return ID;
+}
+
+function randomString(length) {
+    var chars = '0123456789abcdefghijklmnopqrstuvwxyz';
+    var result = '';
+    for (var i = length; i > 0; --i) result += chars[Math.floor(Math.random() * chars.length)];
+    return result;
+}
+
+function spawnBranch(repoName, branchName) {
+    var childObject = {
+        id: randomID(servers),
+        process: undefined,
+        status: 'Spawning',
+        
+        repo: repoName,
+        branch: branchName,
+        port: 'N/A',
+        log: '',
+
+        addToLog: function(str) {
+            // Set port if port is found in log
+            var port = str.match(/:[0-9]{4}\//);
+            if(port && port[0] && port[0].slice(1, 5)) {
+                port = port[0].slice(1, 5);
+                logDebug('Port ' + port + ' detected');
+
+                this.port = port;
+                this.status = 'Up';
+            }
+
+            this.log += str;
+        }
+    }
+    servers.push(childObject);
+
+    logDebug('Spawning branch: ' + chalk.bold.green(branchName) + ' of repository: ' + chalk.bold.blue(repoName));
     require('simple-git')(__dirname + '/repos/' + repoName)
         .outputHandler(function (command, stdout, stderr) {
                 stdout.pipe(process.stdout);
@@ -138,22 +234,38 @@ function checkoutBranch(repoName, branchName) {
                     }
 
                     logDebug('Executing gulp serve...');
-                    var childProcess = child.exec('gulp serve', opts, function(err, stdout, stderr) {
-                        if(err) {
-                            logError('gulp serve failed');
-                            logError(err);
-                            return;
-                        }
+                    childObject.process = child.spawn('gulp', ['serve'], opts);
 
-                        console.log(stdout);
+                    childObject.process.stdout.setEncoding('utf8');
+                    childObject.process.stdout.on('data', function(data) {
+                        childObject.addToLog(data);
                     });
-
-                    servers.push(childProcess);
                 });
             });
         });
 }
 
+function toaster(req, msg) {
+
+    if(!req.session.messages) {
+        req.session.messages = [];
+    }
+
+    req.session.messages.push({'text': msg});
+}
+
+function getToaster(req) {
+    var toReturn;
+
+    if(req.session.messages) {
+        toReturn = req.session.messages;
+        req.session.messages = [];
+    } else {
+        toReturn = [];
+    }
+
+    return toReturn;
+}
 
 /* ====================
      Helper functions

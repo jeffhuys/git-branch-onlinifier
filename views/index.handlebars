@@ -1,40 +1,56 @@
-<h2>Spawn a branch</h2>
+<h1 class="text-center">Git Branch Onlinifier™</h1>
 
-<form action="/spawn" method="get" id="spawnForm">
-    <input type="text" placeholder="Repository name" name="repo">
-    <input type="text" placeholder="Branch name" name="branch">
-    <button type="submit">Spawn!</button>
+<hr>
+
+<h2 id="tester">Spawn a branch</h2>
+<small>Enter an initialized repository's name and branch you want up and press "Spawn!"</small>
+
+<br>
+<br>
+
+<form action="/spawn" method="get" id="spawnForm" class="form-inline">
+    <div class="form-group">
+        <input type="text" placeholder="Repository name" name="repo" class="form-control">
+        <input type="text" placeholder="Branch name" name="branch" class="form-control">
+        <button type="submit" class="btn btn-default">Spawn!</button>
+    </div>
 </form>
+
+<hr>
 
 <h2>Servers online ({{getServersOnlineCount}})</h2>
 <a href="/killAll">Kill all servers</a>
+
 <br>
 <br>
 
-<table class="table table-hover">
-    <thead>
-        <tr>
-            <th>ID</th>
-            <th>Repository</th>
-            <th>Branch</th>
-            <th>Port</th>
-            <th>Status</th>
-            <th>Actions</th>
-        </tr>
-    </thead>
-    <tbody>
-    {{#each servers}}
-        <tr>
-            <th scope="row">{{id}}</th>
-            <td>{{repo}}</td>
-            <td>{{branch}}</td>
-            <td>{{port}}</td>
-            <td>{{status}}</td>
-            <td>
-                <a href="/log/{{id}}" class="btn btn-info">Log</a>
-                <a href="/kill/{{id}}" class="btn btn-danger">Kill</a>
-            </td>
-        </tr>
-    {{/each}}
-    </tbody>
-</table>
+
+<div id="server-list"></div>
+<small id="refresh-counter"></small>
+
+
+
+<script>
+    var refreshEvery = 10;
+
+    var serverListRefreshCounter = 0;
+    setInterval(function() {
+        if(serverListRefreshCounter == 0) {
+            $('#refresh-counter').html( 'Refreshing...' );
+
+            serverListRefreshCounter = -1; // Paused
+
+            $.get('/list', function(data) {
+                $('#server-list').html( data );
+                serverListRefreshCounter = refreshEvery;
+            });
+        } else {
+            if(serverListRefreshCounter > 0) {
+                $('#refresh-counter').html( 'Refreshing in ' + serverListRefreshCounter + 's...' );
+                serverListRefreshCounter--;
+            }
+        }
+
+        
+    }, 1000);
+</script>

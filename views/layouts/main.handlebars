@@ -4,13 +4,15 @@
     <meta charset="utf-8">
     <title>Git Branch Onlinifier</title>
 
+    <!-- JQuery -->
+    <script src="https://code.jquery.com/jquery-1.12.0.min.js"></script>
+
     <!-- Bootstrap -->
-    <!-- Latest compiled and minified CSS -->
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" integrity="sha384-1q8mTJOASx8j1Au+a5WDVnPi2lkFfwwEAa8hDDdjZlpLegxhjVME1fgjWPGmkzs7" crossorigin="anonymous">
-    <!-- Optional theme -->
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap-theme.min.css" integrity="sha384-fLW2N01lMqjakBkx3l/M9EahuwpSfeNvV63J5ezn3uZzapT0u7EYsXMjQV+0En5r" crossorigin="anonymous">
-    <!-- Latest compiled and minified JavaScript -->
+    <!-- CSS (theme) -->
+    <link rel="stylesheet" href="http://bootswatch.com/simplex/bootstrap.min.css" crossorigin="anonymous">
+    <!-- JS -->
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js" integrity="sha384-0mSbJDEHialfmuBBQP6A4Qrprq5OVfW37PRR3j5ELqxss1yVqOtnepnHVP9aJ7xS" crossorigin="anonymous"></script>
+
 
 
     <style>
@@ -18,15 +20,19 @@
             position: fixed;
             text-align: center;
             width: 50%;
-            margin-left: auto;
-            margin-right: auto;
+            margin-left: 20px;
+            margin-top: 20px;
             left: 25%;
 
-            opacity: 0.6;
+            opacity: 0.9;
         }
 
         .messages:hover {
             opacity: 1;
+        }
+
+        .no-remove-pointer-events {
+            pointer-events: initial !important;
         }
     </style>
 
@@ -34,13 +40,15 @@
 <body>
     <div class="container messages">
         {{#each messages}}
-        <div class="alert alert-info" role="alert">{{text}}</div>
+        <div class="alert alert-{{level}} alert-dismissible" role="alert">
+            <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+            {{text}}
+        </div>
         {{/each}}
     </div>
 
     <div class="container">
     {{{body}}}
     </div>
-
 </body>
 </html>

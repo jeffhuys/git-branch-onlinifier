@@ -48,7 +48,7 @@ if(args.length > 0) {
             break;
 
         default:
-            spawnBranch(args[0], args[1]);
+            prepareBranch(args[0], args[1]);
             break;
     }
 } else {
@@ -83,10 +83,21 @@ app.get('/', function(req, res) {
 app.get('/spawn', function(req, res) {
     logDebug('Spawning ' + req.query.branch + ' @ ' + req.query.repo);
 
-    prepareBranch(req.query.repo, req.query.branch);
+    prepareBranch(req.query.repo, req.query.branch, function(success) {
+        if(success) {
+            toaster(req, 'Spawning ' + req.query.branch + '@' + req.query.repo + '. Please wait.', 1);
+            res.redirect('/');
+        } else {
+            toaster(req, 'There has been an error spawning ' + req.query.branch + '@' + req.query.repo + '.', 3);
+            res.redirect('/');
+        }
+    });
+    
+});
 
-    toaster(req, 'Spawning ' + req.query.branch + '@' + req.query.repo + '. Please wait.');
-    res.redirect('/');
+app.get('/list', function(req, res) {
+    logDebug('GET /list');
+    res.render('serverlist', { servers: servers })
 });
 
 app.get('/logs', function(req, res) {
@@ -106,14 +117,14 @@ app.get('/killAll', function(req, res) {
     logDebug('Killing all servers');
     killAllServers();
 
-    toaster(req, 'Killed all servers.');
+    toaster(req, 'Killed all servers.', 1);
     res.redirect('/');
 });
 
 app.get('/kill/:id', function(req, res) {
     logDebug('Killing ' + req.params.id);
 
-    toaster(req, 'Killed server ' + findServerByID(req.params.id).branch + '@' + findServerByID(req.params.id).repo);
+    toaster(req, 'Killed server ' + findServerByID(req.params.id).branch + '@' + findServerByID(req.params.id).repo, 1);
     killServerByID(req.params.id);
 
     res.redirect('/');
@@ -160,7 +171,13 @@ function removeServerByID(id) {
 }
 
 function killServerByID(id, keep) {
-    findServerByID(id).process.kill();
+    var server = findServerByID(id);
+    if(server) {
+        if(server.process && server.process.kill())
+            server.process.kill();
+        else
+            logDebug('Warning: server was found, but no process was attached.');
+    }
 
     if(!keep) removeServerByID(id);
 }
@@ -180,80 +197,24 @@ function randomString(length) {
     return result;
 }
 
-function prepareBranch(repoName, branchName) {
-    var canContinue = false;
-    var path = __dirname + '/repos/' + repoName + '/' + branchName;
+function prepareBranch(repo, branch, callback) {
+    var path = __dirname + '/repos/' + repo + '/' + branch;
 
-    // Check if this repo + branch exists
-    // http://stackoverflow.com/questions/4482686/check-synchronously-if-file-directory-exists-in-node-js
-    try {
-        fs.accessSync(path, fs.F_OK);
-
-        logDebug(path + ' existed. Removing...');
-
-        rimraf(path, function() {
-            logDebug('Removed. Copying...');
-
-            mkdirp(path, function(err) {
-                if(err) {
-                    console.error(err);
-                    return;
-                }
-
-                copyTemplate(repoName, branchName, function(success) {
-                    if(success) {
-                        logDebug('Copy done.');
-                        spawnBranch(repoName, branchName);
-                    } else {
-                        logError('copyTemplate encountered an error');
-                    }
-                });
-            });
-        });
-    } catch (e) {
-        // Repo + branch doesn't exist
-
-        mkdirp(path, function(err) {
-            if(err) {
-                console.error(err);
-                return;
-            }
-
-            logDebug(path + ' created.');
-            
-            copyTemplate(repoName, branchName, function(success) {
-                if(success) {
-                    spawnBranch(repoName, branchName);
-                } else {
-                    logError('copyTemplate encountered an error');
-                }
-            });
-        })
+    // Check if this repo + branch combination already exists in servers
+    if(_.findIndex(servers, function(s) { return s.repo === repo && s.branch === branch; }) > -1 ) {
+        logError('Server already exists');
+        callback(false);
+        return;
     }
-}
 
-function copyTemplate(repoName, branchName, callback) {
-    var path = __dirname + '/repos/' + repoName + '/' + branchName;
-
-    // Copy the template to the folder
-    ncp(__dirname + '/repos/' + repoName + '/_template/', path, function(err) {
-        if(err) {
-            callback(false);
-        }
-
-        logDebug('Copied _template to ' + path);
-        callback(true);
-    })
-}
-
-function spawnBranch(repoName, branchName) {
+    // Create childObject
     var childObject = {
         id: randomID(servers),
         process: undefined,
         status: 'Spawning',
         
-        repo: repoName,
-        branch: branchName,
+        repo: repo,
+        branch: branch,
         port: 'N/A',
         log: '',
 
@@ -271,18 +232,96 @@ function spawnBranch(repoName, branchName) {
             this.log += str;
         }
     }
+    // We push childObject here, but the reference remains.
+    // This means we can keep adding/changing stuff in the object 😄
     servers.push(childObject);
+    callback(true);
 
-    logDebug('Spawning branch: ' + chalk.bold.green(branchName) + ' of repository: ' + chalk.bold.blue(repoName));
-    require('simple-git')(__dirname + '/repos/' + repoName + '/' + branchName)
+    // Check if this repo + branch exists
+    // http://stackoverflow.com/questions/4482686/check-synchronously-if-file-directory-exists-in-node-js
+    try {
+        fs.accessSync(path, fs.F_OK);
+
+        // Repo + branch exists
+        logDebug(path + ' existed. Removing...');
+        childObject.status = 'Removing old version';
+
+        // Remove old folder
+        rimraf(path, function() {
+            logDebug('Removed. Copying...');
+            childObject.status = 'Copying _template';
+
+            mkdirp(path, function(err) {
+                if(err) {
+                    console.error(err);
+                    return;
+                }
+
+                copyTemplate(repo, branch, function(success) {
+                    if(success) {
+                        logDebug('Copy done.');
+                        spawnBranch(childObject);
+                    } else {
+                        logError('copyTemplate encountered an error');
+                    }
+                });
+            });
+        });
+    } catch (e) {
+        // Repo + branch doesn't exist
+        // Create directory
+        mkdirp(path, function(err) {
+            if(err) {
+                console.error(err);
+                return;
+            }
+
+            logDebug(path + ' created.');
+            
+            copyTemplate(repo, branch, function(success) {
+                if(success) {
+                    spawnBranch(childObject);
+                } else {
+                    logError('copyTemplate encountered an error');
+                }
+            });
+        })
+    }
+}
+
+function copyTemplate(repo, branch, callback) {
+    var path = __dirname + '/repos/' + repo + '/' + branch;
+
+    // Copy the template to the folder
+    ncp(__dirname + '/repos/' + repo + '/_template/', path, function(err) {
+        if(err) {
+            callback(false);
+        }
+
+        logDebug('Copied _template to ' + path);
+        callback(true);
+    })
+}
+
+function spawnBranch(childObject) {
+    if(!childObject) {
+        logError('Child object is not here?!');
+        console.dir(childObject);
+    }
+    console.dir(childObject);
+    logDebug('Spawning branch: ' + chalk.bold.green(childObject.branch) + ' of repository: ' + chalk.bold.blue(childObject.repo));
+    require('simple-git')(__dirname + '/repos/' + childObject.repo + '/' + childObject.branch)
         .outputHandler(function (command, stdout, stderr) {
                 stdout.pipe(process.stdout);
                 stderr.pipe(process.stderr);
              })
-        .pull()
-        .checkout(branchName)
-        .pull(function(err, update) {
-            var opts = { cwd: __dirname + '/repos/' + repoName + '/' + branchName };
+        .checkout(childObject.branch, function(err, data) {
+            if(err) {
+                console.log('ERRRRRRRORRRRRR');
+            }
+        })
+        .pull('origin', childObject.branch, function(err, update) {
+            var opts = { cwd: __dirname + '/repos/' + childObject.repo + '/' + childObject.branch };
 
             logDebug('Checkout done.');
             logDebug('Executing npm install...');
@@ -316,16 +355,35 @@ function spawnBranch(repoName, branchName) {
                     });
                 });
             });
+        }).then(function(err, data) {
+            if(err) {
+                console.log('ERRORED OUT');
+            }
         });
 }
 
-function toaster(req, msg) {
+var toasterLevels = [
+    'INFO',
+    'SUCCESS',
+    'WARNING',
+    'DANGER'
+];
+
+function toaster(req, msg, level) {
+    if(!level) var level = 0;
+
+    if(level < 0 || level > toasterLevels.length) {
+        level = 0;
+    }
 
     if(!req.session.messages) {
         req.session.messages = [];
     }
 
-    req.session.messages.push({'text': msg});
+    var message = {'text': msg, 'level': toasterLevels[level].toLowerCase()};
+    req.session.messages.push(message);
+    logDebug('Pushed a message');
+    console.dir(message);
 }
 
 function getToaster(req) {
